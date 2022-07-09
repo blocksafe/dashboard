@@ -1,0 +1,51 @@
+version: 2.1
+jobs:
+  build:
+    docker:
+      - image: cimg/node:16.14.2
+    working_directory: ~/code
+    steps:
+      - checkout
+      - run: npm install
+      - run: node -v
+      - run: npm test 
+      - run: 
+          name: Setup Variables -  Setting tags and image name and exporting to bash_env
+          command: |
+            echo $CIRCLE_BRANCH
+            echo $CIRCLE_BRANCH_NUM
+            if [ $CIRCLE_BRANCH = 'staging' ] || [ $CIRCLE_BRANCH = 'production' ] || [ $CIRCLE_BRANCH = 'master' ]; then
+            echo 'export TAG=0.1.${CIRCLE_BUILD_NUM}' >> $BASH_ENV
+            echo 'export IMAGE_NAME=${CIRCLE_PROJECT_REPONAME}-${CIRCLE_BRANCH}' >> $BASH_ENV
+            fi
+      - setup_remote_docker:
+          docker_layer_chaching: true
+      - run:
+          name: Build and push Docker image
+          command: |
+            if [ $CIRCLE_BRANCH = 'staging' ] || [ $CIRCLE_BRANCH = 'production' ] || [ $CIRCLE_BRANCH = 'master' ]; then
+            
+            echo $CIRCLE_BRANCH
+            echo $DOCKER_ORG
+            echo $IMAGE_NAME
+            echo $TAG
+            echo $DOCKER_LOGIN
+            echo $DOCKER_PWD 
+
+            docker build -t $DOCKER_ORG/$IMAGE_NAME:$TAG .
+            echo $DOCKER_PWD | docker login -u $DOCKER_LOGIN --password-stdin
+            docker push $DOCKER_ORG/$IMAGE_NAME:$TAG
+            fi
+      - run:
+          name: Deploy docker container to correct server for each environment
+          command: |
+            if [ $CIRCLE_BRANCH = 'staging' ]; then
+            ssh -o StrictHostKeyChecking=no ${STAGING_SSH_USER}@${STAGING_IP} "/bin/bash ~/deploy/docker-landing.sh $DOCKER_ORG/$IMAGE_NAME:$TAG $IMAGE_NAME $DOCKER_LOGIN $DOCKER_PWD"
+            fi
+            if [ $CIRCLE_BRANCH = 'production' ]; then
+            ssh -o StrictHostKeyChecking=no ${PRODUCTION_SSH_USER}@${PRODUCTION_IP} "/bin/bash ~/deploy/docker-landing.sh $DOCKER_ORG/$IMAGE_NAME:$TAG $IMAGE_NAME $DOCKER_LOGIN $DOCKER_PWD"
+            fi
+            if [ $CIRCLE_BRANCH = 'master' ]; then
+            ssh -o StrictHostKeyChecking=no ${PRODUCTION_SSH_USER}@${PRODUCTION_IP} "/bin/bash ~/deploy/docker-landing.sh $DOCKER_ORG/$IMAGE_NAME:$TAG $IMAGE_NAME $DOCKER_LOGIN $DOCKER_PWD"
+            fi
+
